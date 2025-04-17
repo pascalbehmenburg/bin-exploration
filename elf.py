@@ -1,7 +1,16 @@
 import struct
 from dataclasses import dataclass, field, fields, is_dataclass
-from enum import Enum
+from enum import Enum, IntFlag
 from typing import BinaryIO
+
+# _____________________________________________________________
+# Elf32_Addr 4 4 Unsigned program address
+# Elf32_Half 2 2 Unsigned medium integer
+# Elf32_Off 4 4 Unsigned file offset
+# Elf32_Sword 4 4 Signed large integer
+# Elf32_Word 4 4 Unsigned large integer
+# unsigned char 1 1 Unsigned small integer
+# __________________________________________________________
 
 
 def _pretty(obj, indent=0):
@@ -220,6 +229,182 @@ class ElfIdentifier[E: ElfDataEncoding]:
         )
 
 
+class ElfSectionHeaderOffsets(Enum):
+    """Section header offsets for ELF files."""
+
+    SHN_UNDEF = 0
+    """Undefined section."""
+
+    SHN_LORESERVE = 0xFF00
+    """This value specifies the lower bound of the range of reserved indexes."""
+
+    SHN_LOPROC = 0xFF00
+    """Values in the range (`SHN_LOPROC` through `SHN_HIPROC` incl.) 
+    are reserved for processor-specific semantics.
+    """
+
+    SHN_HIPROC = 0xFF1F
+    """Values in the range (`SHN_LOPROC` through `SHN_HIPROC` incl.) 
+    are reserved for processor-specific semantics.
+    """
+
+    SHN_ABS = 0xFFF1
+    """Absolute values for the corresponding reference. For example,
+    symbols defined relative to section number SHN_ABS have absolute values and are
+    not affected by relocation.
+    """
+
+    SHN_COMMON = 0xFFF2
+    """Symbols defined relative to this section are common symbols, such as FORTRAN
+    COMMON or unallocated C external variables.
+    """
+
+    SHN_HIRESERVE = 0xFFFF
+    """The upper bound of the range of reserved indexes. The system
+    reserves indexes between `SHN_LORESERVE` and `SHN_HIRESERVE`, inclusive; the
+    values do not reference the section header table. That is, the section header table
+    does not contain entries for the reserved indexes.
+    """
+
+
+class SectionHeaderType(Enum):
+    """A section header's sh_type member specifies the section's semantics.
+
+    Name            Value
+    SHT_NULL        0
+    SHT_PROGBITS    1
+    SHT_SYMTAB      2
+    SHT_STRTAB      3
+    SHT_RELA        4
+    SHT_HASH        5
+    SHT_DYNAMIC     6
+    SHT_NOTE        7
+    SHT_NOBITS      8
+    SHT_REL         9
+    SHT_SHLIB       10
+    SHT_DYNSYM      11
+    SHT_LOPROC      0x70000000
+    SHT_HIPROC      0x7fffffff
+    SHT_LOUSER      0x80000000
+    SHT_HIUSER      0xffffffff
+    """
+
+    SHT_NULL = 0
+    """This value marks the section header as inactive; it does not have an associated section.
+    Other members of the section header have undefined values.
+    """
+
+    SHT_PROGBITS = 1
+    """The section holds information defined by the program, whose format and meaning are
+    determined solely by the program."""
+
+    # These sections hold a symbol table. Currently, an object file may have only one sec-
+    # tion of each type, but this restriction may be relaxed in the future. Typically,
+    # SHT_SYMTAB provides symbols for link editing, though it may also be used for
+    # dynamic linking. As a complete symbol table, it may contain many symbols unneces-
+    # sary for dynamic linking. Consequently, an object file may also contain a
+    # SHT_DYNSYM section, which holds a minimal set of dynamic linking symbols, to save
+    # space. See ‘‘Symbol Table’’ below for details.
+
+    SHT_SYMTAB = 2
+    """Typically, `SHT_SYMTAB` provides symbols for link editing, though it may also be used for
+    dynamic linking. As a complete symbol table, it may contain many symbols unneces-
+    sary for dynamic linking. 
+    """
+
+    SHT_STRTAB = 3
+    """The section holds a string table. An object file may have multiple string table sections.
+    See "String Table" below for details.
+    """
+
+    SHT_RELA = 4
+    """The section holds relocation entries with explicit addends, such as type Elf32_Rela
+    for the 32-bit class of object files. An object file may have multiple relocation sections.
+    See "Relocation" below for details.
+    """
+
+    SHT_HASH = 5
+    """The section holds a symbol hash table. All objects participating in dynamic linking
+    must contain a symbol hash table. Currently, an object file may have only one hash
+    table, but this restriction may be relaxed in the future. See "Hash Table" in Part 2 for
+    details."""
+
+    SHT_DYNAMIC = 6
+    """The section holds information for dynamic linking. Currently, an object file may have
+    only one dynamic section, but this restriction may be relaxed in the future. See
+    "Dynamic Section" in Part 2 for details.
+    """
+
+    SHT_NOTE = 7
+    """The section holds information that marks the file in some way.
+
+    See "Note Section" in Part 2 for details.
+    """
+
+    SHT_NOBITS = 8
+    """A section of this type occupies no space in the file but otherwise resembles
+    `SHT_PROGBITS`. Although this section contains no bytes, the `sh_offset` member
+    contains the conceptual file offset.
+    """
+
+    SHT_REL = 9
+    """The section holds relocation entries without explicit addends, such as type
+    Elf32_Rel for the 32-bit class of object files. An object file may have multiple reloca-
+    tion sections.
+
+    See "Relocation" below for details.
+    """
+
+    SHT_SHLIB = 10
+    """This section type is reserved but has unspecified semantics. Programs that contain a
+    section of this type do not conform to the ABI.
+    """
+
+    SHT_DYNSYM = 11
+    """Consequently, an object file may also contain a `SHT_DYNSYM` section, 
+    which holds a minimal set of dynamic linking symbols, to save space.
+    See "Symbol Table" below for details.
+    """
+
+    SHT_LOPROC = 0x70000000
+    """Values in this inclusive range (`SHT_LOPROC` through `SHT_HIPROC` incl.) are 
+    reserved for processor-specific semantics.
+    """
+
+    SHT_HIPROC = 0x7FFFFFFF
+    """Values in this inclusive range (`SHT_LOPROC` through `SHT_HIPROC` incl.) are 
+    reserved for processor-specific semantics.
+    """
+
+    SHT_LOUSER = 0x80000000
+    """This value specifies the lower bound of the range of indexes reserved for application
+    programs.
+    """
+
+    SHT_HIUSER = 0xFFFFFFFF
+    """This value specifies the upper bound of the range of indexes reserved for application
+    programs. Section types between `SHT_LOUSER` and `SHT_HIUSER` may be used by
+    the application, without conflicting with current or future system-defined section
+    types.
+    """
+
+
+class SectionHeaderFlags(IntFlag):
+    """Section header flags for ELF files."""
+
+    SHF_WRITE = 0x1
+    """The section contains writable data."""
+
+    SHF_ALLOC = 0x2
+    """The section occupies memory during process execution."""
+
+    SHF_EXECINSTR = 0x4
+    """The section contains executable instructions."""
+
+    SHF_MASKPROC = 0xF0000000
+    """The bits of the sh_flags member are reserved for processor-specific semantics."""
+
+
 @dataclass
 class ElfHeader[E: ElfDataEncoding]:
     """Representation of the executable and link format (ELF).
@@ -362,8 +547,207 @@ class ElfHeader[E: ElfDataEncoding]:
 
     def get_section_header_table(self):
         """Returns the section header table."""
-        self.file_copy.seek(self.e_shoff)
-        return NotImplemented
+        for i in range(self.e_shnum):
+            offset = self.e_shoff + i * self.e_shentsize
+            elf_section = ElfSection.from_elf_header(self, offset)
+            print(elf_section)
+
+
+@dataclass
+class ElfSection[E: ElfDataEncoding]:
+    """Sections contain all information in an object file, except the ELF header,
+    the program header table, and the section header table.
+    Moreover, object files’ sections satisfy several conditions:
+
+    - Every section in an object file has exactly one section header describing it.
+    Section headers may exist that do not have a section.
+    - Each section occupies one contiguous (possibly empty) sequence of bytes within a file.
+    - Sections in a file may not overlap. Not byte in a file resides in more than one section.
+    - An object file may have inactive space. The various headers and the sections might not "cover"
+    every byte in an object file. The contents of the inactive data are unspecified.
+
+    ## Special sections
+
+    Name        Type                Attributes
+    .bss        SHT_NOBITS          SHF_ALLOC + SHF_WRITE
+    .comment    SHT_PROGBITS        none
+    .data       SHT_PROGBITS        SHF_ALLOC + SHF_WRITE
+    .data1      SHT_PROGBITS        SHF_ALLOC + SHF_WRITE
+    .debug      SHT_PROGBITS        none
+    .dynamic    SHT_DYNAMIC         see below
+    .dynstr     SHT_STRTAB          SHF_ALLOC
+    .dynsym     SHT_DYNSYM          SHF_ALLOC
+    .fini       SHT_PROGBITS        SHF_ALLOC + SHF_EXECINSTR
+    .got        SHT_PROGBITS        see below
+    .hash       SHT_HASH            SHF_ALLOC
+    .init       SHT_PROGBITS        SHF_ALLOC + SHF_EXECINSTR
+    .interp     SHT_PROGBITS        see below
+    .line       SHT_PROGBITS        none
+    .note       SHT_NOTE            none
+    .plt        SHT_PROGBITS        see below
+    .relname    SHT_REL             see below
+    .relaname   SHT_RELA            see below
+    .rodata     SHT_PROGBITS        SHF_ALLOC
+    .rodata1    SHT_PROGBITS        SHF_ALLOC
+    .shstrtab   SHT_STRTAB          none
+    .strtab     SHT_STRTAB          see below
+    .symtab     SHT_SYMTAB          see below
+    .text       SHT_PROGBITS        SHF_ALLOC + SHF_EXECINSTR
+    """
+
+    endianness: E
+    """Carries endianness info of the section header."""
+
+    sh_name: int
+    """Section name string table index. (4/8 bytes)
+    
+    This member specifies the name of the section. Its value is an index into the section
+    header string table section [see: "String Table"], giving the location of a null-
+    terminated string.
+    """
+
+    sh_type: SectionHeaderType
+    """Section type. (4/8 bytes)
+    
+    This member categorizes the section's contents and semantics. Section types and their
+    descriptions appear below.
+    """
+
+    sh_flags: SectionHeaderFlags
+    """Section attributes. (4/8 bytes)
+
+    Name                Value
+    SHF_WRITE           0x1
+    SHF_ALLOC           0x2
+    SHF_EXECINSTR       0x4
+    SHF_MASKPROC        0xf0000000
+
+    Sections support 1-bit flags that describe miscellaneous attributes. Flag definitions
+    appear below.
+    """
+
+    sh_addr: int
+    """Section virtual address. (4/8 bytes)
+    
+    If the section will appear in the memory image of a process, this member gives the
+    address at which the section's first byte should reside. Otherwise, the member con-
+    tains 0.
+    """
+
+    sh_offset: int
+    """Section file offset. (4/8 bytes)
+    
+    This member's value gives the byte offset from the beginning of the file to the first
+    byte in the section. One section type, SHT_NOBITS described below, occupies no
+    space in the file, and its sh_offset member locates the conceptual placement in the
+    file.
+    """
+
+    sh_size: int
+    """Section size in bytes. (4/8 bytes)
+    
+    This member gives the section's size in bytes. Unless the section type is
+    SHT_NOBITS, the section occupies sh_size bytes in the file. A section of type
+    SHT_NOBITS may have a non-zero size, but it occupies no space in the file.
+    """
+
+    sh_link: int
+    """Section header table index link. (4/8 bytes)
+    
+    This member holds a section header table index link, whose interpretation depends
+    on the section type. A table below describes the values.
+
+    sh_type                     sh_link (section header index)                  sh_info
+    SHT_DYNAMIC                 String table used by entries in the section.    0
+    SHT_HASH                    Symbol table to which the hash table applies.   0
+    SHT_REL / SHT_RELA          Associated symbol table.                        The section header index of 
+                                                                                the section which the relocation applies.
+    SHT_SYMTAB / SHT_DYNSYM     Associated string table.                        One greater than the symbol table index
+                                                                                of the last local symbol (binding `STB_LOCAL`)
+    other                       SHN_UNDEF                                       0
+    """
+
+    sh_info: int
+    """Section header table index info. (4/8 bytes)
+    
+    This member holds extra information, whose interpretation depends on the section
+    type. A table below describes the values.
+    """
+
+    sh_addralign: int
+    """Section address alignment. (4/8 bytes)
+    
+    Some sections have address alignment constraints. For example, if a section holds a
+    doubleword, the system must ensure doubleword alignment for the entire section.
+    That is, the value of sh_addr must be congruent to 0, modulo the value of
+    sh_addralign. Currently, only 0 and positive integral powers of two are allowed.
+    Values 0 and 1 mean the section has no alignment constraints.
+    """
+
+    sh_entsize: int
+    """Section entry size. (4/8 bytes)
+    
+    Some sections hold a table of fixed-size entries, such as a symbol table. For such a sec-
+    tion, this member gives the size in bytes of each entry. The member contains 0 if the
+    section does not hold a table of fixed-size entries.
+    """
+
+    def __repr__(self):
+        return _pretty(self)
+
+    @classmethod
+    def from_elf_header(
+        cls, elf_header: ElfHeader[E], section_offset: int
+    ) -> "ElfSection[E]":
+        section_bytes = elf_header.file_copy[
+            section_offset : section_offset + elf_header.e_shentsize
+        ]
+
+        if elf_header.e_ident.file_class == ElfFileClass.ELFCLASS32:
+            section_bytes = section_bytes[0:32]
+        elif elf_header.e_ident.file_class == ElfFileClass.ELFCLASS64:
+            section_bytes = section_bytes[0:64]
+        else:
+            raise ValueError("Invalid ELF file class.")
+
+        endianness_fmt = (
+            ">"
+            if elf_header.e_ident.data_encoding == ElfDataEncoding.ELFDATA2MSB
+            else "<"
+        )
+        # Choose struct format and unpack exactly the section‐header size
+        if elf_header.e_ident.file_class == ElfFileClass.ELFCLASS32:
+            # 10 × 4-byte fields: sh_name, sh_type, sh_flags, sh_addr, sh_offset,
+            # sh_size, sh_link, sh_info, sh_addralign, sh_entsize
+            bin_fmt = f"{endianness_fmt}10I"
+        else:
+            # ELF64_Shdr: I,I; Q×4; I,I; Q,Q
+            # (sh_name, sh_type), (sh_flags, sh_addr, sh_offset, sh_size),
+            # (sh_link, sh_info), (sh_addralign, sh_entsize)
+            bin_fmt = f"{endianness_fmt}IIQQQQIIQQ"
+        header_size = struct.calcsize(bin_fmt)
+        # unpack only the exact bytes we need
+        header_data = struct.unpack(bin_fmt, section_bytes[:header_size])
+
+        # safe conversion for section type (allow unknown values)
+        raw_type = header_data[1]
+        try:
+            sh_type = SectionHeaderType(raw_type)
+        except ValueError:
+            sh_type = raw_type
+        return cls(
+            endianness=elf_header.e_ident.data_encoding,
+            sh_name=header_data[0],
+            sh_type=sh_type,
+            sh_flags=SectionHeaderFlags(header_data[2]),
+            sh_addr=header_data[3],
+            sh_offset=header_data[4],
+            sh_size=header_data[5],
+            sh_link=header_data[6],
+            sh_info=header_data[7],
+            sh_addralign=header_data[8],
+            sh_entsize=header_data[9],
+        )
 
 
 def parse_elf_file(filepath: str) -> ElfHeader[ElfDataEncoding]:
@@ -373,6 +757,7 @@ def parse_elf_file(filepath: str) -> ElfHeader[ElfDataEncoding]:
 
 if __name__ == "__main__":
     try:
-        print(parse_elf_file("./example"))
+        elf_header = parse_elf_file("./example")
+        print(elf_header.get_section_header_table())
     except Exception as e:
         print(f"Error parsing ELF file: {e}")
