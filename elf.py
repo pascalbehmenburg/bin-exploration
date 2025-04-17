@@ -22,7 +22,17 @@ class ElfDataEncoding(Enum):
 
 
 class ElfFileType(Enum):
-    """File type for ELF files."""
+    """File type for ELF files.
+
+    Name        Value       Mapping
+    ET_NONE     0           No file type
+    ET_REL      1           Relocatable file
+    ET_EXEC     2           Executable file
+    ET_DYN      3           Shared object file
+    ET_CORE     4           Core file
+    ET_LOPROC   0xff00      Processor-specific
+    ET_HIPROC   0xffff      Processor-specific
+    """
 
     ET_NONE = 0
     """No file type."""
@@ -50,7 +60,12 @@ class ElfFileType(Enum):
 
 
 class ElfVersion(Enum):
-    """Version of the ELF file."""
+    """Version of the ELF file.
+
+    Name        Value       Meaning
+    EV_NONE     0           Invalid version
+    EV_CURRENT  1           Current version
+    """
 
     EV_NONE = 0
     """Invalid version."""
@@ -63,7 +78,22 @@ class ElfVersion(Enum):
 
 
 class ElfMachine(Enum):
-    """Machine type for ELF files."""
+    """Machine type for ELF files.
+
+    Name        Value       Meaning
+    EM_NONE     0           No machine
+    EM_M32      1           AT&T WE 32100
+    EM_SPARC    2           SPARC
+    ..
+    EM_X86_64   62          AMD x86-64 architecture
+
+
+    Refer to `/usr/include/elf.h` or run something like:
+    ```bash
+    cat /usr/include/elf.h | grep -n -A190 "EM_NONE"
+    ```
+    to see all (locally) available machine codes as of today.
+    """
 
     EM_NONE = 0
     """No machine."""
@@ -114,7 +144,6 @@ class ElfIdentifier[E: ElfDataEncoding]:
     EI_DATA     5           Data encoding               0/1/2 -> ELFDATANONE/ELFDATA2LSB/ELFDATA2MSB
     EI_VERSION  6           File version                1     -> EV_CURRENT
     EI_PAD      7           Start of padding bytes      reserved fields default to zero
-
     """
 
     magic: bytes
@@ -175,45 +204,15 @@ class ElfHeader[E: ElfDataEncoding]:
 
     e_type: ElfFileType
     """Identifies the object file type. (2 bytes)
-    
-    Name        Value       Mapping
-    ET_NONE     0           No file type
-    ET_REL      1           Relocatable file
-    ET_EXEC     2           Executable file
-    ET_DYN      3           Shared object file
-    ET_CORE     4           Core file
-    ET_LOPROC   0xff00      Processor-specific
-    ET_HIPROC   0xffff      Processor-specific
-
     File contents are unspecified but ET_CORE is reserved to mark the file.
-
     Values from ET_LOPROC through ET_HIPROC (incl.) are reserved for processor-specific semantics. 
     """
 
     e_machine: ElfMachine
-    """Specifies the required architecture for an individual file. (2 bytes)
-    
-    Name        Value       Meaning
-    EM_NONE     0           No machine
-    EM_M32      1           AT&T WE 32100
-    EM_SPARC    2           SPARC
-    ..
-    EM_X86_64   62          AMD x86-64 architecture
-
-    Refer to `/usr/include/elf.h` or run something like:
-    ```bash
-    cat /usr/include/elf.h | grep -n -A190 "EM_NONE"
-    ```
-    to see all (locally) available machine codes as of today.
-    """
+    """Specifies the required architecture for an individual file. (2 bytes)"""
 
     e_version: ElfVersion
     """Identifies the object file version. (4 bytes)
-    
-    Name        Value       Meaning
-    EV_NONE     0           Invalid version
-    EV_CURRENT  1           Current version
-
     Value 1 signifies the original file format which persists to this day.
     """
 
@@ -235,9 +234,7 @@ class ElfHeader[E: ElfDataEncoding]:
 
     e_flags: int
     """Holds processor-specific flags associated with the file. (4 bytes)
-
     Flag names take the form EF_<machine_flag>.
-
     TODO: See "Machine information"
     """
 
@@ -280,7 +277,6 @@ class ElfHeader[E: ElfDataEncoding]:
         except ValueError as e:
             raise ValueError(f"Invalid ELF identifier: {e}")
 
-        # Determine binary format based on endianness and file class
         endianness_fmt = (
             ">" if e_ident.data_encoding == ElfDataEncoding.ELFDATA2MSB else "<"
         )
