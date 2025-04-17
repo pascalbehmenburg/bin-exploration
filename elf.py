@@ -1,8 +1,41 @@
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from enum import Enum
-from pprint import pprint
 from typing import BinaryIO
+
+
+def _pretty(obj, indent=0):
+    sp = " " * 8
+    indent_str = sp * indent
+    # Dataclass → recurse
+    if is_dataclass(obj):
+        cls_name = obj.__class__.__name__
+        out = [f"{indent_str}{cls_name}("]
+        for idx, f in enumerate(fields(obj)):
+            # skip hidden fields
+            if f.metadata.get("redacted", False):
+                continue
+            val = getattr(obj, f.name)
+            # First field of top‐level ElfHeader: no "e_ident="
+            if indent == 0 and idx == 0 and is_dataclass(val):
+                nested = _pretty(val, indent + 1)
+                out.append(f"{nested}, ")
+            else:
+                val_repr = _pretty(val, indent + 1)
+                out.append(f"{sp * (indent + 1)}{f.name}={val_repr},")
+        out.append(f"{indent_str})")
+        return "\n".join(out)
+    # Enum → qualified name
+    if isinstance(obj, Enum):
+        return f"{obj.__class__.__name__}.{obj.name}"
+    # bytes → repr
+    if isinstance(obj, (bytes, bytearray)):
+        return repr(obj)
+    # int → hex
+    if isinstance(obj, int):
+        return hex(obj)
+    # fallback
+    return repr(obj)
 
 
 class ElfDataEncoding(Enum):
@@ -129,7 +162,7 @@ class ElfFileClass(Enum):
         return f"{self.name}[{self.value}]"
 
 
-@dataclass(repr=True)
+@dataclass
 class ElfIdentifier[E: ElfDataEncoding]:
     """Marks the file as an object file and provides machine-independent
     data with which to decode and interpret the file-contents. (16 bytes)
@@ -158,6 +191,9 @@ class ElfIdentifier[E: ElfDataEncoding]:
     version: ElfVersion
     """Version of the ELF file. (1 byte)"""
 
+    def __repr__(self):
+        return _pretty(self)
+
     @classmethod
     def from_bytes(cls, e_ident: bytes) -> "ElfIdentifier[ElfDataEncoding]":
         """Creates an ElfIdentifier instance from bytes."""
@@ -184,7 +220,7 @@ class ElfIdentifier[E: ElfDataEncoding]:
         )
 
 
-@dataclass(repr=True)
+@dataclass
 class ElfHeader[E: ElfDataEncoding]:
     """Representation of the executable and link format (ELF).
 
@@ -269,11 +305,20 @@ class ElfHeader[E: ElfDataEncoding]:
     TODO: See Sections and String Table below for more information
     """
 
+    file_copy: bytes = field(metadata={"redacted": True})
+    """Copy of the file contents from which the ELF header was read."""
+
+    def __repr__(self):
+        return _pretty(self)
+
     @classmethod
     def from_file(cls, file: BinaryIO) -> "ElfHeader[ElfDataEncoding]":
         """Parses an ELF header from a file handle."""
+        # read once
+        file_copy = file.read()
+
         try:
-            e_ident = ElfIdentifier.from_bytes(file.read(16))
+            e_ident = ElfIdentifier.from_bytes(file_copy[0:16])
         except ValueError as e:
             raise ValueError(f"Invalid ELF identifier: {e}")
 
@@ -283,7 +328,6 @@ class ElfHeader[E: ElfDataEncoding]:
         is_64bit = e_ident.file_class == ElfFileClass.ELFCLASS64
 
         # Describe binary format for struct.unpack
-        # For 64-bit ELF, we use 'Q' for 8-byte values instead of 'I'
         bin_fmt = (
             f"{endianness_fmt}"  # Endianness
             + "HH"  # e_type, e_machine
@@ -293,8 +337,9 @@ class ElfHeader[E: ElfDataEncoding]:
             + "HHHHHH"  # e_ehsize through e_shstrndx
         )
 
-        # Read and unpack the rest of the header
-        header_data = struct.unpack(bin_fmt, file.read(struct.calcsize(bin_fmt)))
+        # unpack only the bytes immediately after the 16‑byte e_ident
+        header_size = struct.calcsize(bin_fmt)
+        header_data = struct.unpack(bin_fmt, file_copy[16 : 16 + header_size])
 
         return cls(
             e_ident=e_ident,
@@ -311,7 +356,14 @@ class ElfHeader[E: ElfDataEncoding]:
             e_shentsize=header_data[10],
             e_shnum=header_data[11],
             e_shstrndx=header_data[12],
+            # preserve the full file bytes
+            file_copy=file_copy,
         )
+
+    def get_section_header_table(self):
+        """Returns the section header table."""
+        self.file_copy.seek(self.e_shoff)
+        return NotImplemented
 
 
 def parse_elf_file(filepath: str) -> ElfHeader[ElfDataEncoding]:
@@ -321,6 +373,6 @@ def parse_elf_file(filepath: str) -> ElfHeader[ElfDataEncoding]:
 
 if __name__ == "__main__":
     try:
-        pprint(parse_elf_file("./example"))
+        print(parse_elf_file("./example"))
     except Exception as e:
         print(f"Error parsing ELF file: {e}")
