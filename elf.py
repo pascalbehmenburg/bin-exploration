@@ -25,10 +25,27 @@ def _pretty(obj, indent=0):
             if f.metadata.get("redacted", False):
                 continue
             val = getattr(obj, f.name)
-            # First field of top‐level ElfHeader: no "e_ident="
+            # First field of top‐level dataclass: inline repr for readability
             if indent == 0 and idx == 0 and is_dataclass(val):
                 nested = _pretty(val, indent + 1)
                 out.append(f"{nested}, ")
+            # Nested dataclass field: align block under field name
+            elif is_dataclass(val):
+                # pretty-print nested dataclass under field name
+                nested_lines = _pretty(val, indent + 1).splitlines()
+                # strip all leading/trailing whitespace
+                stripped = [ln.strip() for ln in nested_lines]
+                # first line: field=<indent><class>(
+                # add extra indent so nested class aligns under itself on next lines
+                extra_indent = sp * (indent)
+                out.append(f"{sp * (indent + 1)}{f.name}={extra_indent}{stripped[0]}")
+                # middle lines: indent one level deeper
+                for i, ln in enumerate(stripped[1:], start=1):
+                    # closing parenthesis aligns with field before
+                    level = indent + 1 if i == len(stripped) - 1 else indent + 2
+                    out.append(f"{sp * level}{ln}")
+                # add comma to closing parenthesis line
+                out[-1] += ","
             else:
                 val_repr = _pretty(val, indent + 1)
                 out.append(f"{sp * (indent + 1)}{f.name}={val_repr},")
@@ -146,8 +163,20 @@ class ElfMachine(Enum):
     EM_SPARC = 2
     """SPARC."""
 
+    EM_ARM = 40
+    """ARM architecture."""
+
     EM_AMD_X86_64 = 62
     """AMD x86-64 architecture."""
+
+    EM_CUDA = 190
+    """NVIDIA CUDA architecture."""
+
+    EM_AMDGPU = 224
+    """AMD GPU architecture."""
+
+    EM_BPF = 247
+    """Linux BPF (extended BPF)."""
 
     # Add more machine types as needed
 
@@ -547,10 +576,52 @@ class ElfHeader[E: ElfDataEncoding]:
 
     def get_section_header_table(self):
         """Returns the section header table."""
+        # extract section-name string table bytes
+        name_table_bytes = self.get_section_name_string_table()
+        sections = []
         for i in range(self.e_shnum):
             offset = self.e_shoff + i * self.e_shentsize
-            elf_section = ElfSection.from_elf_header(self, offset)
-            print(elf_section)
+            sec = ElfSection.from_elf_header(self, offset, name_table_bytes)
+            sections.append(sec)
+        return sections
+
+    def get_section_name_string_table(self) -> bytes:
+        """Extract the section header string table bytes by using e_shstrndx."""
+        idx = self.e_shstrndx
+        base = self.e_shoff + idx * self.e_shentsize
+        sec_hdr = self.file_copy[base : base + self.e_shentsize]
+        # trim to actual header size
+        if self.e_ident.file_class == ElfFileClass.ELFCLASS32:
+            sec_hdr = sec_hdr[:32]
+        else:
+            sec_hdr = sec_hdr[:64]
+        fmt = ">" if self.e_ident.data_encoding == ElfDataEncoding.ELFDATA2MSB else "<"
+        if self.e_ident.file_class == ElfFileClass.ELFCLASS32:
+            bin_fmt = f"{fmt}10I"
+        else:
+            bin_fmt = f"{fmt}IIQQQQIIQQ"
+        unpacked = struct.unpack(bin_fmt, sec_hdr[: struct.calcsize(bin_fmt)])
+        # sh_offset is field 4, sh_size is field 5
+        sh_offset, sh_size = unpacked[4], unpacked[5]
+        return self.file_copy[sh_offset : sh_offset + sh_size]
+
+
+@dataclass
+class SectionHeaderName:
+    offset: int
+    name: str
+
+    @classmethod
+    def from_string_table(cls, string_table: bytes, offset: int) -> "SectionHeaderName":
+        """Slice out the NUL‑terminated name at `offset`."""
+        if offset < 0 or offset >= len(string_table):
+            raise ValueError(f"Name offset {offset} out of bounds")
+        end = string_table.find(b"\x00", offset)
+        raw = string_table[offset:] if end == -1 else string_table[offset:end]
+        return cls(offset, raw.decode("utf-8", errors="replace"))
+
+    def __repr__(self):
+        return _pretty(self)
 
 
 @dataclass
@@ -598,7 +669,7 @@ class ElfSection[E: ElfDataEncoding]:
     endianness: E
     """Carries endianness info of the section header."""
 
-    sh_name: int
+    sh_name: SectionHeaderName
     """Section name string table index. (4/8 bytes)
     
     This member specifies the name of the section. Its value is an index into the section
@@ -697,7 +768,7 @@ class ElfSection[E: ElfDataEncoding]:
 
     @classmethod
     def from_elf_header(
-        cls, elf_header: ElfHeader[E], section_offset: int
+        cls, elf_header: ElfHeader[E], section_offset: int, name_table_bytes: bytes
     ) -> "ElfSection[E]":
         section_bytes = elf_header.file_copy[
             section_offset : section_offset + elf_header.e_shentsize
@@ -735,9 +806,13 @@ class ElfSection[E: ElfDataEncoding]:
             sh_type = SectionHeaderType(raw_type)
         except ValueError:
             sh_type = raw_type
+
+        raw_name = header_data[0]
+        sh_name = SectionHeaderName.from_string_table(name_table_bytes, raw_name)
+
         return cls(
             endianness=elf_header.e_ident.data_encoding,
-            sh_name=header_data[0],
+            sh_name=sh_name,
             sh_type=sh_type,
             sh_flags=SectionHeaderFlags(header_data[2]),
             sh_addr=header_data[3],
@@ -758,6 +833,7 @@ def parse_elf_file(filepath: str) -> ElfHeader[ElfDataEncoding]:
 if __name__ == "__main__":
     try:
         elf_header = parse_elf_file("./example")
+        print(elf_header)
         print(elf_header.get_section_header_table())
     except Exception as e:
         print(f"Error parsing ELF file: {e}")
